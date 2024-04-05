@@ -1,0 +1,79 @@
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.dummy import DummyOperator
+from airflow.operators.python import BranchPythonOperator
+from airflow.utils.state import State
+from airflow.exceptions import AirflowException
+
+def branch_based_on_task2_failure(**kwargs):
+    # Get the task instance for task2 from the context
+    task_instance = kwargs['ti']
+    dag_run = task_instance.get_dagrun()
+    task2_instance = dag_run.get_task_instance(task_id='task2')
+
+    # Check if task2 has been triggered
+    if task2_instance is None:
+        #raise AirflowException("task2 has not yet been triggered")
+        print("task2 has not yet been triggered")
+        exit(0)
+    
+    # Check the state of task2
+    task2_state = task2_instance.state
+    
+    if task2_state == State.FAILED:
+        return 'task4'
+    else:
+        return 'skip_task4'
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'email': ['airflow@example.com'],
+    'email_on_failure': False,
+    'email_on_retry': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+    'start_date': datetime(2023, 1, 1),
+}
+
+with DAG(
+    'conditional_branching_example',
+    default_args=default_args,
+    description='An example DAG which branches based on the state of task2',
+    schedule_interval=timedelta(days=1),
+    catchup=False,
+) as dag:
+
+    task1 = DummyOperator(
+        task_id='task1',
+    )
+
+    task2 = DummyOperator(
+        task_id='task2',
+    )
+
+    branch_op = BranchPythonOperator(
+        task_id='branch_task2_failure',
+        python_callable=branch_based_on_task2_failure,
+        provide_context=True,
+    )
+
+    task3 = DummyOperator(
+        task_id='task3',
+    )
+
+    task4 = DummyOperator(
+        task_id='task4',
+    )
+
+    skip_task4 = DummyOperator(
+        task_id='skip_task4',
+    )
+
+    task5 = DummyOperator(
+        task_id='task5',
+    )
+
+    task1 >> task2 >> branch_op
+    branch_op >> [task4, skip_task4]
+    task3 >> task5
